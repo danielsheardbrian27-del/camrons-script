@@ -1,0 +1,307 @@
+-- =============================================
+-- Camron Script - Updated Version
+-- • Aimbot: ALWAYS ON (no toggle needed)
+-- • GUI toggle: Right Shift
+-- • Tracers + Info Box toggle: G key
+-- • Headshot only, auto-switch on death, FOV limited
+-- =============================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Settings
+local FOV = 220
+local ESP_ENABLED = true  -- tracers + boxes start ON
+
+local currentTarget = nil
+
+-- Drawings
+local drawings = {}
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 2
+fovCircle.Color = Color3.fromRGB(255, 80, 80)
+fovCircle.Filled = false
+fovCircle.Transparency = 0.7
+fovCircle.NumSides = 100
+fovCircle.Radius = FOV
+
+local function createESP(plr)
+	if drawings[plr] or plr == LocalPlayer then return end
+	
+	local tracer = Drawing.new("Line")
+	tracer.Thickness = 2
+	tracer.Color = Color3.fromRGB(255, 60, 60)
+	tracer.Transparency = 1
+	
+	local box = Drawing.new("Square")
+	box.Thickness = 2
+	box.Color = Color3.fromRGB(0, 0, 0)
+	box.Filled = true
+	box.Transparency = 0.45
+	
+	local nameText = Drawing.new("Text")
+	nameText.Size = 15
+	nameText.Color = Color3.fromRGB(255, 255, 255)
+	nameText.Center = true
+	nameText.Outline = true
+	
+	local hpText = Drawing.new("Text")
+	hpText.Size = 14
+	hpText.Color = Color3.fromRGB(0, 255, 0)
+	hpText.Center = true
+	hpText.Outline = true
+	
+	local distText = Drawing.new("Text")
+	distText.Size = 14
+	distText.Color = Color3.fromRGB(255, 255, 255)
+	distText.Center = true
+	distText.Outline = true
+	
+	drawings[plr] = {Tracer = tracer, Box = box, Name = nameText, HP = hpText, Distance = distText}
+end
+
+local function removeESP(plr)
+	if drawings[plr] then
+		for _, v in pairs(drawings[plr]) do v:Remove() end
+		drawings[plr] = nil
+	end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(removeESP)
+
+-- Helpers
+local function isValidTarget(plr)
+	if not plr or not plr.Character then return false end
+	local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+	local head = plr.Character:FindFirstChild("Head")
+	return hum and hum.Health > 0.1 and head
+end
+
+local function getClosestTargetInFOV()
+	local bestPlayer = nil
+	local bestDist = math.huge
+	local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+	
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and isValidTarget(plr) then
+			local head = plr.Character:FindFirstChild("Head")
+			if head then
+				local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+				if onScreen then
+					local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+					if screenDist < FOV and screenDist < bestDist then
+						bestDist = screenDist
+						bestPlayer = plr
+					end
+				end
+			end
+		end
+	end
+	return bestPlayer
+end
+
+-- Always-on Aimbot
+RunService.RenderStepped:Connect(function()
+	fovCircle.Visible = true
+	fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+	fovCircle.Radius = FOV
+	
+	-- Aimbot (always active)
+	if not isValidTarget(currentTarget) then
+		currentTarget = getClosestTargetInFOV()
+	end
+	
+	if currentTarget and currentTarget.Character and currentTarget.Character:FindFirstChild("Head") then
+		local head = currentTarget.Character.Head
+		Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, head.Position)
+	end
+	
+	-- ESP / Tracers
+	if ESP_ENABLED then
+		for plr, draw in pairs(drawings) do
+			if isValidTarget(plr) then
+				local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character.Head
+				local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+				local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+				
+				if onScreen then
+					draw.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+					draw.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+					draw.Tracer.Visible = true
+					
+					local boxPos = Vector2.new(screenPos.X + 18, screenPos.Y - 52)
+					draw.Box.Position = boxPos
+					draw.Box.Size = Vector2.new(150, 74)
+					draw.Box.Visible = true
+					
+					draw.Name.Text = plr.DisplayName or plr.Name
+					draw.Name.Position = boxPos + Vector2.new(75, 9)
+					draw.Name.Visible = true
+					
+					local hpPct = math.floor((hum.Health / hum.MaxHealth) * 100)
+					draw.HP.Text = "HP: " .. hpPct .. "%"
+					draw.HP.Position = boxPos + Vector2.new(75, 29)
+					draw.HP.Visible = true
+					
+					local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+					local dist = myRoot and math.floor((myRoot.Position - root.Position).Magnitude) or 0
+					draw.Distance.Text = "Dist: " .. dist
+					draw.Distance.Position = boxPos + Vector2.new(75, 49)
+					draw.Distance.Visible = true
+				else
+					for k, v in pairs(draw) do v.Visible = false end
+				end
+			else
+				for k, v in pairs(draw) do v.Visible = false end
+			end
+		end
+	else
+		for _, draw in pairs(drawings) do
+			for k, v in pairs(draw) do v.Visible = false end
+		end
+	end
+end)
+
+-- GUI (toggled with Right Shift)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CamronGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Enabled = false  -- starts hidden
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 320, 0, 260)
+Frame.Position = UDim2.new(0.5, -160, 0.5, -130)
+Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 12)
+Corner.Parent = Frame
+
+local Stroke = Instance.new("UIStroke")
+Stroke.Color = Color3.fromRGB(255, 60, 60)
+Stroke.Thickness = 2
+Stroke.Parent = Frame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 45)
+Title.BackgroundTransparency = 1
+Title.Text = "Camron Script"
+Title.TextColor3 = Color3.fromRGB(255, 60, 60)
+Title.TextSize = 22
+Title.Font = Enum.Font.GothamBold
+Title.Parent = Frame
+
+-- Draggable
+local dragging, dragInput, dragStart, startPos
+Frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = Frame.Position
+	end
+end)
+Frame.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+end)
+
+-- FOV control
+local fovLabel = Instance.new("TextLabel")
+fovLabel.Size = UDim2.new(1, -40, 0, 30)
+fovLabel.Position = UDim2.new(0, 20, 0, 70)
+fovLabel.BackgroundTransparency = 1
+fovLabel.Text = "FOV: " .. FOV
+fovLabel.TextColor3 = Color3.fromRGB(255,255,255)
+fovLabel.TextSize = 16
+fovLabel.Font = Enum.Font.Gotham
+fovLabel.Parent = Frame
+
+local fovInput = Instance.new("TextBox")
+fovInput.Size = UDim2.new(0, 80, 0, 30)
+fovInput.Position = UDim2.new(1, -110, 0, 70)
+fovInput.BackgroundColor3 = Color3.fromRGB(40,40,40)
+fovInput.Text = tostring(FOV)
+fovInput.TextColor3 = Color3.fromRGB(255,255,255)
+fovInput.TextSize = 16
+fovInput.Font = Enum.Font.Gotham
+fovInput.Parent = Frame
+
+local fovCorner = Instance.new("UICorner")
+fovCorner.CornerRadius = UDim.new(0,8)
+fovCorner.Parent = fovInput
+
+fovInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local num = tonumber(fovInput.Text)
+		if num and num >= 50 and num <= 900 then
+			FOV = num
+			fovLabel.Text = "FOV: " .. FOV
+			fovCircle.Radius = FOV
+		else
+			fovInput.Text = tostring(FOV)
+		end
+	end
+end)
+
+-- Status
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -40, 0, 40)
+status.Position = UDim2.new(0, 20, 0, 140)
+status.BackgroundTransparency = 1
+status.Text = "Aimbot: ALWAYS ON\nTracers: " .. (ESP_ENABLED and "ON" or "OFF")
+status.TextColor3 = Color3.fromRGB(200,255,200)
+status.TextSize = 16
+status.Font = Enum.Font.Gotham
+status.TextWrapped = true
+status.Parent = Frame
+
+-- Close button
+local close = Instance.new("TextButton")
+close.Size = UDim2.new(0,30,0,30)
+close.Position = UDim2.new(1,-40,0,8)
+close.BackgroundColor3 = Color3.fromRGB(170,0,0)
+close.Text = "X"
+close.TextColor3 = Color3.fromRGB(255,255,255)
+close.TextSize = 18
+close.Font = Enum.Font.GothamBold
+close.Parent = Frame
+
+local closeC = Instance.new("UICorner")
+closeC.CornerRadius = UDim.new(0,8)
+closeC.Parent = close
+
+close.MouseButton1Click:Connect(function()
+	ScreenGui.Enabled = false
+end)
+
+-- Keybinds
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	
+	if input.KeyCode == Enum.KeyCode.RightShift then
+		ScreenGui.Enabled = not ScreenGui.Enabled
+	elseif input.KeyCode == Enum.KeyCode.G then
+		ESP_ENABLED = not ESP_ENABLED
+		status.Text = "Aimbot: ALWAYS ON\nTracers: " .. (ESP_ENABLED and "ON" or "OFF")
+		print("Tracers toggled: " .. (ESP_ENABLED and "ON" or "OFF"))
+	end
+end)
+
+print("Camron Script loaded")
+print("• Aimbot → always on")
+print("• Right Shift → show/hide GUI")
+print("• G → toggle tracers + info boxes")
+print("• FOV changeable in GUI")
