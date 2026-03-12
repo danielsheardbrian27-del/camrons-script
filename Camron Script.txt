@@ -1,0 +1,207 @@
+-- =============================================
+-- Camron Script - ALWAYS-ON Headshot Aimbot (On-Screen Only + Infinite Distance)
+-- • Always active headshot aimbot (no hold key needed)
+-- • Only targets players whose HEAD is visible on your screen
+-- • Infinite distance – aims at any visible head anywhere on screen
+-- • Instantly switches to next visible alive player when current one dies (HP ≤ 0)
+-- • Tracers + name / HP% / distance info box at tracer end
+-- • Press INSERT to toggle on/off
+-- =============================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- ===================== SETTINGS =====================
+local AIMBOT_ENABLED = true
+local ESP_ENABLED = true
+local TOGGLE_KEY = Enum.KeyCode.Insert
+
+local currentTarget = nil
+
+-- ===================== DRAWINGS =====================
+local drawings = {}
+local fovCircle = Drawing.new("Circle")  -- visual only, very large for "infinite" feel
+fovCircle.Thickness = 2
+fovCircle.Color = Color3.fromRGB(255, 80, 80)
+fovCircle.Filled = false
+fovCircle.Transparency = 0.65
+fovCircle.NumSides = 100
+fovCircle.Radius = 9999
+
+local function createESP(plr)
+	if drawings[plr] or plr == LocalPlayer then return end
+	
+	local tracer = Drawing.new("Line")
+	tracer.Thickness = 2
+	tracer.Color = Color3.fromRGB(255, 60, 60)
+	tracer.Transparency = 1
+	
+	local box = Drawing.new("Square")
+	box.Thickness = 2
+	box.Color = Color3.fromRGB(0, 0, 0)
+	box.Filled = true
+	box.Transparency = 0.45
+	
+	local nameText = Drawing.new("Text")
+	nameText.Size = 15
+	nameText.Color = Color3.fromRGB(255, 255, 255)
+	nameText.Center = true
+	nameText.Outline = true
+	
+	local hpText = Drawing.new("Text")
+	hpText.Size = 14
+	hpText.Color = Color3.fromRGB(0, 255, 0)
+	hpText.Center = true
+	hpText.Outline = true
+	
+	local distText = Drawing.new("Text")
+	distText.Size = 14
+	distText.Color = Color3.fromRGB(255, 255, 255)
+	distText.Center = true
+	distText.Outline = true
+	
+	drawings[plr] = {
+		Tracer = tracer,
+		Box = box,
+		Name = nameText,
+		HP = hpText,
+		Distance = distText
+	}
+end
+
+local function removeESP(plr)
+	if drawings[plr] then
+		for _, v in pairs(drawings[plr]) do v:Remove() end
+		drawings[plr] = nil
+	end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+	createESP(p)
+end
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(removeESP)
+
+-- ===================== HELPERS =====================
+local function isValidTarget(plr)
+	if not plr or not plr.Character then return false end
+	local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+	local head = plr.Character:FindFirstChild("Head")
+	return hum and hum.Health > 0.1 and head
+end
+
+local function getClosestVisibleHead()
+	local bestPlayer = nil
+	local bestDist = math.huge
+	local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+	
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and isValidTarget(plr) then
+			local head = plr.Character:FindFirstChild("Head")
+			if head then
+				local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+				if onScreen then
+					local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+					if screenDist < bestDist then
+						bestDist = screenDist
+						bestPlayer = plr
+					end
+				end
+			end
+		end
+	end
+	return bestPlayer
+end
+
+-- ===================== MAIN LOOP =====================
+RunService.RenderStepped:Connect(function()
+	fovCircle.Visible = AIMBOT_ENABLED
+	fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+	
+	-- Always-on aimbot – only visible heads, infinite distance
+	if AIMBOT_ENABLED then
+		if not isValidTarget(currentTarget) then
+			currentTarget = getClosestVisibleHead()
+		end
+		
+		if currentTarget and currentTarget.Character and currentTarget.Character:FindFirstChild("Head") then
+			local head = currentTarget.Character.Head
+			Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, head.Position)
+		end
+	end
+	
+	-- ESP + Tracers + Info Box
+	if ESP_ENABLED then
+		for plr, draw in pairs(drawings) do
+			if isValidTarget(plr) then
+				local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character.Head
+				local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+				local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+				
+				if onScreen then
+					draw.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+					draw.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+					draw.Tracer.Visible = true
+					
+					local boxPos = Vector2.new(screenPos.X + 18, screenPos.Y - 52)
+					draw.Box.Position = boxPos
+					draw.Box.Size = Vector2.new(150, 74)
+					draw.Box.Visible = true
+					
+					draw.Name.Text = plr.DisplayName or plr.Name
+					draw.Name.Position = boxPos + Vector2.new(75, 9)
+					draw.Name.Visible = true
+					
+					local hpPct = math.floor((hum.Health / hum.MaxHealth) * 100)
+					draw.HP.Text = "HP: " .. hpPct .. "%"
+					draw.HP.Position = boxPos + Vector2.new(75, 29)
+					draw.HP.Visible = true
+					
+					local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+					local dist = myRoot and math.floor((myRoot.Position - root.Position).Magnitude) or 0
+					draw.Distance.Text = "Dist: " .. dist
+					draw.Distance.Position = boxPos + Vector2.new(75, 49)
+					draw.Distance.Visible = true
+				else
+					draw.Tracer.Visible = false
+					draw.Box.Visible = false
+					draw.Name.Visible = false
+					draw.HP.Visible = false
+					draw.Distance.Visible = false
+				end
+			else
+				draw.Tracer.Visible = false
+				draw.Box.Visible = false
+				draw.Name.Visible = false
+				draw.HP.Visible = false
+				draw.Distance.Visible = false
+			end
+		end
+	else
+		for _, draw in pairs(drawings) do
+			draw.Tracer.Visible = false
+			draw.Box.Visible = false
+			draw.Name.Visible = false
+			draw.HP.Visible = false
+			draw.Distance.Visible = false
+		end
+	end
+end)
+
+-- ===================== TOGGLE =====================
+UserInputService.InputBegan:Connect(function(input)
+	if input.KeyCode == TOGGLE_KEY then
+		AIMBOT_ENABLED = not AIMBOT_ENABLED
+		ESP_ENABLED = AIMBOT_ENABLED
+		print("Camron Script - Headshot Aimbot: " .. (AIMBOT_ENABLED and "ENABLED" or "DISABLED"))
+	end
+end)
+
+print("Camron Script loaded successfully!")
+print("• Always-on headshot aimbot (only visible players on screen)")
+print("• Infinite distance targeting")
+print("• Auto target switch on death")
+print("• Press INSERT to toggle")
